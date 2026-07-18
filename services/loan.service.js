@@ -114,18 +114,22 @@ async function close(id, status) {
   const transaction = await sequelize.transaction();
   try {
     const loan = await Loan.findByPk(id, {
-      include: [{ model: Book }],
       transaction,
       lock: transaction.LOCK.UPDATE,
     });
     if (!loan) throw new AppError(404, 'Préstamo no encontrado');
     if (loan.status !== 1) throw new AppError(409, 'El préstamo ya fue devuelto o cancelado');
 
+    const book = await Book.findByPk(loan.bookId, {
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    if (!book) throw new AppError(404, 'Libro asociado no encontrado');
+
     const changes = { status };
     if (status === 2) changes.returnDate = today();
     await loan.update(changes, { transaction });
 
-    const book = loan.Book;
     const availableCopies = Math.min(book.totalCopies, book.availableCopies + 1);
     await book.update({
       availableCopies,
@@ -133,6 +137,7 @@ async function close(id, status) {
     }, { transaction });
 
     await transaction.commit();
+    loan.Book = book;
     return loanDto(loan);
   } catch (error) {
     await transaction.rollback();

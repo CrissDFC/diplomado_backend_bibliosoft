@@ -119,10 +119,11 @@ test('devolver incrementa una sola copia y marca el préstamo devuelto', async (
     async update(data) { Object.assign(this, data); },
   };
   const loan = {
-    id: 9, status: 1, loanDate: '2026-07-01', Book: book,
+    id: 9, bookId: 3, status: 1, loanDate: '2026-07-01',
     async update(data) { Object.assign(this, data); return this; },
   };
   Loan.findByPk = async () => loan;
+  Book.findByPk = async () => book;
 
   const returned = await loanService.returnLoan(9);
 
@@ -140,10 +141,11 @@ test('cancelar restaura inventario y no permite repetir la operación', async ()
     async update(data) { Object.assign(this, data); },
   };
   const loan = {
-    id: 9, status: 1, Book: book,
+    id: 9, bookId: 3, status: 1,
     async update(data) { Object.assign(this, data); return this; },
   };
   Loan.findByPk = async () => loan;
+  Book.findByPk = async () => book;
 
   assert.equal((await loanService.cancel(9)).status, 0);
   assert.equal(book.availableCopies, 2);
@@ -152,6 +154,30 @@ test('cancelar restaura inventario y no permite repetir la operación', async ()
   sequelize.transaction = async () => secondTx;
   await assert.rejects(loanService.cancel(9), { status: 409 });
   assert.equal(secondTx.rolledBack, true);
+});
+
+test('cierra préstamos sin combinar LEFT JOIN con FOR UPDATE', async () => {
+  const tx = transaction();
+  sequelize.transaction = async () => tx;
+  const book = {
+    totalCopies: 2, availableCopies: 1, status: 1,
+    async update(data) { Object.assign(this, data); },
+  };
+  let loanOptions;
+  let requestedBookId;
+  Loan.findByPk = async (id, options) => {
+    loanOptions = options;
+    return {
+      id, bookId: 3, status: 1,
+      async update(data) { Object.assign(this, data); return this; },
+    };
+  };
+  Book.findByPk = async (id) => { requestedBookId = id; return book; };
+
+  await loanService.returnLoan(9);
+
+  assert.equal(loanOptions.include, undefined);
+  assert.equal(requestedBookId, 3);
 });
 
 test('las rutas restringen las mutaciones al personal', () => {
